@@ -1,0 +1,208 @@
+#include <ESP8266WiFi.h>
+#include <Wire.h>
+#include <SPI.h>
+#include <WiFiClient.h>
+#include <ESP8266WebServer.h>
+#include <ESP8266WiFiMulti.h>
+#include <RTClib.h>
+ESP8266WiFiMulti WiFiMulti;
+WiFiServer server(80);
+int irsens = 0, distcount = 0, m, sec;
+
+int anglecnt;
+int rem, sign,h;
+#define CS 15
+double tot;
+int mastdistrot;
+int arrotcount, arrotrem;
+RTC_DS1307 RTC;
+void setup()
+{
+  pinMode(CS, OUTPUT);
+  pinMode(irsens, INPUT);
+  Serial.begin(9600);
+  digitalWrite(CS, HIGH);
+  SPI.begin();
+  WiFiMulti.addAP("ROBODUCKS", "roboducks");
+  Serial.println();
+  Serial.println();
+  Serial.print("Wait for WiFi... ");
+  while (WiFiMulti.run() != WL_CONNECTED)
+  {
+    Serial.print(".");
+    delay(500);
+  }
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+  delay(1);
+  Serial.println("HTTP server started");
+  server.begin();
+  RTC.begin();
+  Wire.begin();
+  if (!RTC.isrunning())
+  {
+    Serial.println("RTC is NOT running!\n");
+    RTC.adjust(DateTime(0, 0, 0, 0, 0, 0));
+  }
+  RTC.adjust(DateTime(0, 0, 0, 0, 0, 0));
+}
+
+void spi_comm (void) {
+  SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+  int flag = 0;
+  while (flag < 5)
+  {
+    digitalWrite(CS, LOW);
+    SPI.transfer(0);
+    digitalWrite(CS, LOW);
+    delay(10);
+    
+    if (flag == 0)
+    {
+      digitalWrite(CS, LOW);
+      anglecnt = SPI.transfer(0);
+      digitalWrite(CS, LOW);
+      delay(10);
+      flag++;
+    }
+
+    if (flag == 1)
+    {
+      digitalWrite(CS, LOW);
+      SPI.transfer(4);
+      digitalWrite(CS, LOW);
+      delay(10);
+
+      digitalWrite(CS, LOW);
+      rem = SPI.transfer(4);
+      digitalWrite(CS, LOW);
+      delay(10);
+      flag++;
+    }
+    if (flag == 2)
+    {
+      digitalWrite(CS, LOW);
+      SPI.transfer(5);
+      digitalWrite(CS, LOW);
+      delay(10);
+
+      digitalWrite(CS, LOW);
+      sign = SPI.transfer(5);
+      digitalWrite(CS, LOW);
+      delay(10);
+      flag++;
+    }
+
+    /*if (flag == 3)
+    {
+      digitalWrite(CS, LOW);
+      SPI.transfer(6);
+      digitalWrite(CS, LOW);
+      delay(10);
+
+      digitalWrite(CS, LOW);
+      arrotcount = SPI.transfer(6);
+      digitalWrite(CS, LOW);
+      delay(10);
+      flag++;
+    }
+
+    if (flag == 4)
+    {
+      digitalWrite(CS, LOW);
+      SPI.transfer(7);
+      digitalWrite(CS, LOW);
+      delay(10);
+
+      digitalWrite(CS, LOW);
+      arrotrem = SPI.transfer(7);
+      digitalWrite(CS, LOW);
+      delay(10);
+      flag++;
+    }*/
+    SPI.endTransaction();
+
+    tot = double(double(rem / 100.00) + anglecnt);
+    tot = tot * 255.00;
+    tot = tot / 100.00 + 0.02;
+    if (sign % 10==1)
+    {
+      tot = tot * (1);
+    }
+    else if(sign % 10==0)
+    {
+      tot=tot * (-1);
+    }
+    h=sign/10;
+    mastdistrot =  arrotcount;
+    Serial.print("ANGLE:"); Serial.println(tot);
+    //Serial.print("DISTANCE:"); Serial.println(mastdistrot);
+    Serial.println("distance");Serial.println(h);
+    //Serial.print("ARROTCOUNT:");Serial.println(arrotcount);Serial.print("ARROTREM:");Serial.println(arrotrem);
+  }
+}
+
+void rtc()
+{
+  DateTime now = RTC.now();
+  m = now.minute();
+  sec = now.second();
+  if (m > 0)
+  {
+    sec = sec + (m * 60);
+  }
+  //    Serial.print(" Sec: ");
+  //    Serial.print(sec, DEC);
+  //    Serial.println();
+}
+String prepareHtmlPage()
+{
+  rtc();
+  String htmlPage =
+    String("HTTP/1.1 200 OK\r\n") +
+    "Content-Type: text/html\r\n" +
+    "Connection: close" +
+    "Refresh: 0.6"+
+    //"\r\n" +
+    +"<!DOCTYPE HTML>" +
+    "<html><body><h1>Roboducks</h1><h2>MPU6050 Readouts + Distance Readouts</h2><a href=\"http://192.168.43.66/STOP\">EMERGENCY STOP  </a><hr/></body>" +
+     tot +"r"+ h +"p"+ sec + "y" +"\r\n";                                
+    "\r";
+  return htmlPage;
+}
+
+void loop()
+{
+  if (digitalRead(irsens) == HIGH)
+  {
+    delay(2000);
+    if (digitalRead(irsens) == HIGH)
+    {
+      spi_comm();
+      rtc();
+      Serial.print("RTC TIME:"); Serial.println(sec);
+      WiFiClient client = server.available();
+      if (client)
+      {
+        Serial.println("\n[Client connected]");
+        while (client.connected())
+        {
+          if (client.available())
+          {
+            String line = client.readStringUntil('\r');
+            Serial.print(line);
+            if (line.length() == 1 && line[0] == '\n')
+            {
+              client.println(prepareHtmlPage());
+              break;
+            }
+          }
+        }
+        client.stop();
+        Serial.println("[Client disonnected]");
+      }
+    }
+  }
+}
