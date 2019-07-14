@@ -1,0 +1,466 @@
+#include<Wire.h>
+#include <SPI.h>
+#include <MPU6050_tockn.h>
+
+int slavedistcount1;
+int slavedistcount, mastdistcount,slavepitch,mastpitch,mastercommand;
+int m;
+int s;
+int sec=1;
+int irsens=1;
+
+
+int sda=15;
+int scl=12;
+#define M_PI 3.14159265359      
+#define dt 0.01 
+#define ACCELEROMETER_SENSITIVITY 8192.0
+#define GYROSCOPE_SENSITIVITY 300
+
+const int MPU_addr=0x68;  // I2C address of the MPU-6050
+int16_t AcX,AcY,AcZ,GyX,GyY,GyZ,Tmp;
+double pitchAcc,rollAcc,pitch1,roll1;
+
+const int l1=13;
+const int l2=15;
+const int r1=14;
+const int r2=12;
+const int e1=10;
+const int e2=9;
+
+const int pingPin1 = 2; // Trigger Pin of Ultrasonic Sensor
+const int echoPin1 = 5; // Echo Pin of Ultrasonic Sensor
+
+const int pingPin2=2;
+const int echoPin2=4;
+const int pingPin3=2;
+const int echoPin3=0;
+
+
+void setup() {
+  Serial.begin(9600); // Starting Serial Terminal
+  pinMode(l1,OUTPUT);
+  pinMode(l2,OUTPUT);
+  pinMode(r1,OUTPUT);
+  pinMode(r2,OUTPUT);
+  pinMode(e1, OUTPUT);
+  pinMode(e2,OUTPUT);
+  pinMode(pingPin1, OUTPUT);
+  pinMode(echoPin1, INPUT);
+  pinMode(pingPin2, OUTPUT);
+  pinMode(echoPin2, INPUT);
+  pinMode(pingPin3, OUTPUT);
+  pinMode(echoPin3,INPUT);
+  pinMode(irsens, INPUT);
+
+  Wire.begin();
+  Wire.beginTransmission(MPU_addr);
+  Wire.write(0x6B);     // PWR_MGMT_1 register
+  Wire.write(0);        // set to zero (wakes up the MPU-6050)
+  Wire.endTransmission(true);
+
+    /*SPCR |= bit(SPE);                               
+    pinMode(MISO, OUTPUT);
+    SPI.attachInterrupt();*/
+  
+}
+
+int c,spicount=0;
+//int mastdistcount;
+
+
+ISR(SPI_STC_vect)
+{ 
+  c=SPDR;
+  if(c==0)
+  {
+    mastdistcount=c;
+    mastdistcount=mastdistcount-slavedistcount1;
+    slavedistcount=0;
+    
+    while(true)
+    { 
+      forward(200);
+      if(distance(pingPin1, echoPin1)<12)
+      {
+        sto();
+        delay(2000);
+        
+        if(distance(pingPin1, echoPin1)<12)
+        {
+        SPDR=6;
+        oa();
+        }
+        
+      }
+      if(slavedistcount==mastdistcount)
+      {
+        break;
+      }
+      if(digitalRead(irsens)==HIGH)
+      {
+        slavedistcount++;
+      }
+    }
+    SPDR=10; // to indicate bot has covered the distne required.
+    return;
+  }
+  
+  if(c==1)
+  {
+    left();
+    return;
+  }
+  if(c==2)
+  {
+    right();
+    return;
+    
+  }
+  if(c==3)
+  {
+    sto();
+    return;
+  }
+  
+}
+
+
+void mpu()
+{
+  Wire.beginTransmission(MPU_addr);
+  Wire.write(0x3B);  // starting with register 0x3B (ACCEL_XOUT_H)
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU_addr,14,true);  // request a total of 14 registers
+  AcX=Wire.read()<<8|Wire.read();  // 0x3B (ACCEL_XOUT_H) & 0x3C (ACCEL_XOUT_L)    
+  AcY=Wire.read()<<8|Wire.read();  // 0x3D (ACCEL_YOUT_H) & 0x3E (ACCEL_YOUT_L)
+  AcZ=Wire.read()<<8|Wire.read();  // 0x3F (ACCEL_ZOUT_H) & 0x40 (ACCEL_ZOUT_L)
+  Tmp=Wire.read()<<8|Wire.read();  // 0x41 (TEMP_OUT_H) & 0x42 (TEMP_OUT_L)
+  GyX=Wire.read()<<8|Wire.read();  // 0x43 (GYRO_XOUT_H) & 0x44 (GYRO_XOUT_L)
+  GyY=Wire.read()<<8|Wire.read();  // 0x45 (GYRO_YOUT_H) & 0x46 (GYRO_YOUT_L)
+  GyZ=Wire.read()<<8|Wire.read();  // 0x47 (GYRO_ZOUT_H) & 0x48 (GYRO_ZOUT_L)
+  //Serial.print("AcX = "); Serial.print(AcX);
+  //Serial.print(" | AcY = "); Serial.print(AcY);
+  //Serial.print(" | AcZ = "); Serial.print(AcZ);
+  //Serial.print(" | GyX = "); Serial.print(GyX);
+ // Serial.print(" | GyY = "); Serial.print(GyY);
+  //Serial.print(" | GyZ = "); Serial.println(GyZ);
+  
+          
+ 
+    // Integrate the gyroscope data -> int(angularSpeed) = angle
+    pitch1 += ((float)GyZ / GYROSCOPE_SENSITIVITY) * dt; // Angle around the Z-axis
+    roll1 -= ((float)GyY / GYROSCOPE_SENSITIVITY) * dt;    // Angle around the Y-axis
+ 
+    // Compensate for drift with accelerometer data if !bullshit
+    // Sensitivity = -2 to 2 G at 16Bit -> 2G = 32768 && 0.5G = 8192
+    int forceMagnitudeApprox = abs(AcX) + abs(AcY) + abs(AcZ);
+    if (forceMagnitudeApprox > 8192 && forceMagnitudeApprox < 32768)
+    {
+ // Turning around the X axis results in a vector on the Y-axis
+        pitchAcc = atan2f((float)AcX, (float)AcY) * 180 / M_PI;
+        pitch1 = pitch1 * 0.98 + pitchAcc * 0.02;
+       
+        
+  // Turning around the Y axis results in a vector on the X-axis
+        rollAcc = atan2f((float)AcX, (float)AcZ) * 180 / M_PI;
+        roll1 = roll1 * 0.98 + rollAcc * 0.02;
+       
+    }
+  
+}
+
+
+void forward(float mos)
+{  
+  digitalWrite(e1,HIGH);
+  analogWrite(l1,mos);
+  analogWrite(l2, 0);
+  //analogWrite(ep1, 140);  
+  // ep1 and ep2 are escape pin 1 and 2 respectively ENA and ENB
+  digitalWrite(e2,HIGH);
+  analogWrite(r1, 0);
+  analogWrite(r2, mos);
+  //analogWrite(ep2, 110);
+  //Serial.print(mos);
+  //delay(1000);
+  
+}
+void right()
+{ 
+  digitalWrite(e1,HIGH);
+  digitalWrite(e2,HIGH);
+  analogWrite(l1,150);
+  analogWrite(l2, 0);
+  //analogWrite(ep1, 140);
+  analogWrite(r1, 0);
+  analogWrite(r2,0);
+  //analogWrite(ep2, 110);
+
+}
+void left()
+{
+  digitalWrite(e1,HIGH);
+  digitalWrite(e2,HIGH);
+  analogWrite(l1,0);
+  analogWrite(l2, 0);
+  //analogWrite(ep1, 140);
+  analogWrite(r1, 0);
+  analogWrite(r2, 150);
+  //analogWrite(ep2, 110);
+ 
+}
+void back(float mos)
+{
+  digitalWrite(e1,HIGH);
+  digitalWrite(e2,HIGH);
+  analogWrite(l1,0);
+  analogWrite(l2, mos);
+  //analogWrite(ep1, 140);
+  analogWrite(r1, 0);
+  analogWrite(r2, mos);
+  
+}
+
+void sto()            // to stop.
+{
+  digitalWrite(e1,HIGH);
+  digitalWrite(e2,HIGH);
+  analogWrite(l1,0);
+  analogWrite(l2, 0);
+  analogWrite(r1, 0);
+  analogWrite(r2, 0);
+ 
+}
+
+long microsecondsToCentimeters(long microseconds) {
+   return microseconds / 29 / 2;
+}
+
+float distance(int pingPin, int echoPin)
+{
+  long duration, inches, cm, mos;
+   
+   digitalWrite(pingPin, LOW);
+   delayMicroseconds(2);
+   digitalWrite(pingPin, HIGH);
+   delayMicroseconds(10);
+   digitalWrite(pingPin, LOW);
+   
+   duration = pulseIn(echoPin, HIGH);
+   cm = microsecondsToCentimeters(duration);
+   return cm;
+   
+}
+int pitchinti,countinitial,countfinal,pitchfinal;
+void oa()
+{ 
+int cm1 , cm2;
+countinitial=0;
+countfinal=0;
+mpu();
+pitchinti=pitch1;
+
+  while(true)
+  {
+    left();
+    Serial.println("Taking first left");
+    cm1=distance(pingPin2, echoPin2);
+    delay(100);
+    cm2=distance(pingPin3, echoPin3);
+    delay(100);
+    if(cm1<15 && cm2<15 && abs(cm1-cm2)<2)
+    {
+      sto();
+      delay(200);
+      break;
+      
+    }
+    
+  }
+  countinitial=0;
+  while(true)
+  { 
+    
+    forward(200);
+    Serial.println("Going forward for the first time");
+    cm1=distance(pingPin2, echoPin2);
+    delay(100);
+    cm2=distance(pingPin3, echoPin3);
+    countinitial++;
+    if(cm1>=30 && cm2>=30)
+    { 
+      delay(400);
+      Serial.print("stopping");
+      sto();
+      delay(200);
+      break;
+      
+    }
+  }
+  while(true)
+  {
+    right();
+    Serial.println("going right first time");
+    if(distance(pingPin2, echoPin2)<15 && distance(pingPin3, echoPin3)<15 && abs(distance(pingPin2, echoPin2)-distance(pingPin3, echoPin3))<4 )
+    {
+      sto();
+      delay(200);
+      break;
+      }
+      
+   else if(distance(pingPin3,echoPin3)<15 && distance(pingPin2, echoPin2)>20 && abs(distance(pingPin2, echoPin2)-distance(pingPin3, echoPin3))>4)
+    {
+      sto();
+      forward(200);      
+      if(distance(pingPin2, echoPin2)<15 && distance(pingPin3, echoPin3)<15 && abs(distance(pingPin2, echoPin2)-distance(pingPin3, echoPin3))<3)
+      { 
+        sto();
+        delay(200);
+        break;
+      }
+    }
+  }
+  while(true)
+  {
+    forward(200);
+    slavedistcount1++;
+    Serial.println("Going forward for second time");
+    if(distance(pingPin2, echoPin2)>40 && distance(pingPin3, echoPin3)>40)
+    { 
+      delay(300);
+      sto();
+      delay(200);
+      break;
+      
+    }
+  }
+  while(true)
+  {
+    right();
+    Serial.println("Going right for the second time");
+    if(distance(pingPin2, echoPin2)<15 && distance(pingPin3, echoPin3)<15 && abs(distance(pingPin2, echoPin2)-distance(pingPin3, echoPin3))<3)
+    {
+      sto();
+      delay(200);
+      break;
+      
+    }
+    else if(distance(pingPin3,echoPin3)<15 && distance(pingPin2, echoPin2)>20 && abs(distance(pingPin2, echoPin2)-distance(pingPin3, echoPin3))>5)
+    {
+      sto();
+      forward(200);      
+      if(distance(pingPin2, echoPin2)<15 && distance(pingPin3, echoPin3)<15 && abs(distance(pingPin2, echoPin2)-distance(pingPin3, echoPin3))<3)
+      { 
+        sto();
+        delay(200);
+        break;
+      }
+    }
+   }
+   countfinal=0;
+   while(countfinal<=countinitial)
+   {
+   forward(200);
+   Serial.println("Going forward for the third time");
+   countfinal++;
+   delay(10);
+   }
+   mpu();
+   pitchfinal=pitch1;
+   while(abs(pitchfinal)<=abs(pitch1)+90)
+   {
+    left();
+    delay(10);
+    mpu();
+    pitchfinal=pitch1;
+   }
+   sto();
+   
+     Serial.println("OA complet");
+    } 
+void mastcommand()
+{
+ slavedistcount1=0;
+ while(mastdistcount>=slavedistcount1 + slavedistcount)
+ {  
+
+   if(distance(pingPin1, echoPin1)<=12)
+   {
+    oa();
+    
+   }
+    forward(200);
+    slavedistcount1++;
+        
+ }
+ mpu();
+ slavepitch=pitch1;
+ if(mastpitch<0)  //means left
+ {
+  while(mastpitch<slavepitch)
+  {
+    left();
+    mpu();
+    slavepitch=pitch1;
+    
+  }
+ }
+ if(mastpitch>0)
+ {
+  while(mastpitch>slavepitch)
+  {
+    right();
+    mpu();
+    slavepitch=pitch1;
+    
+  }
+ }
+}
+void loop() {
+  float mos;
+  float cm= distance(pingPin1, echoPin1);
+  if(digitalRead(irsens)==HIGH)
+  {
+     slavedistcount1++;    // Slave bot rotations
+  }
+   int flag=1;
+   if(flag==1)
+   {
+    
+    forward(200);
+    flag=2;
+   }
+   
+   if(distance(pingPin1,echoPin1)>10)
+   {
+    mos=200;
+    forward(200);
+    Serial.println("Freeway");
+   }
+   
+    /*if(distance(pingPin1,echoPin1)>15 && distance(pingPin1,echoPin1)<30)
+    { 
+      
+      mos= map(cm,15,30,0,200);
+      forward(mos);
+      Serial.println("Between 15 and 30");
+    }*/
+    if(distance(pingPin1,echoPin1)<=12)
+   {
+    sto();
+    Serial.println("Obstacle");
+    delay(2000);
+    if(distance(pingPin1,echoPin1)<=13) 
+      {
+        Serial.println("Obstacle confirmed");
+        oa();
+        
+      }
+
+      if(mastercommand==1)
+      {
+        mastcommand();
+      }
+   }
+}
