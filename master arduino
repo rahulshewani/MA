@@ -1,0 +1,265 @@
+//MASTER ARDUINO
+#include "Wire.h"
+#include "RTClib.h"
+#include "SoftwareSerial.h"
+#include <SPI.h>
+#define M_PI 3.14159265359 
+#define r 3.4
+
+SoftwareSerial BTSerial(0, 1);
+RTC_DS1307 RTC;
+int flag=0,h=0;
+const int l1 = 3;
+const int l2 = 4;
+const int r1 = 5;
+const int r2 = 6;
+char ch,ch1;
+int m;
+int sec,sec1;
+int count=0,distance=0,disc=0,op=0,vb=0,t,y,w,er;
+char recev='z';
+volatile boolean process_it=false;  
+int countir =0;           
+void setup()
+{ 
+  Serial.begin(9600);                        
+  SPCR |= bit(SPE);                                        
+  pinMode(MISO, OUTPUT);                                    
+  process_it = false;                                       
+  SPI.attachInterrupt(); 
+  pinMode(7,INPUT);
+    
+  pinMode(l1, OUTPUT);
+  pinMode(l2, OUTPUT);
+  pinMode(r1, OUTPUT);
+  pinMode(r2, OUTPUT);
+  Wire.begin();
+  RTC.begin();
+  if (!RTC.isrunning())
+  {
+    Serial.println("RTC is NOT running!\n");
+  }
+  RTC.adjust(DateTime(0, 0, 0, 0, 0, 0));
+  BTSerial.begin(9600);
+ 
+  /*w = analogRead (7); 
+  digitalWrite(13,HIGH);
+  delay(3000); //time to change color to calibrate
+  
+  y = analogRead(7);
+  delay(3000);
+  digitalWrite(13,LOW);*/
+  
+}
+
+void rtc()
+{
+  DateTime now = RTC.now();
+  m = now.minute();
+  sec = now.second();
+  if (m > 0)
+  {
+    sec = sec + (m * 60);
+  }
+  Serial.print(" Sec: ");
+  Serial.print(sec, DEC);
+  Serial.println();
+  
+}
+
+ISR(SPI_STC_vect)
+{
+
+  int c= SPDR;
+ 
+  if(c==0)      //0= bhejo
+  { 
+    rtc();
+    if(sec<=255)
+    {
+      sec1=sec;
+    }
+    if(sec>(count+1)*255)
+    {
+      count++;
+    }
+    if(sec>255 && sec<=(count+1)*255)
+    {
+      sec1=sec-(count*255);
+     
+    }
+  
+     SPDR=sec1;
+     op++;
+ 
+     
+     return;
+     }
+     
+     
+     if(op==1 && c==1)
+     {
+      SPDR=count;
+      op++;
+      return;
+      }
+
+     if(op==2 && c==2) // 2 asks for distance
+     {
+      if(distance<=255)
+      {
+        er=distance;
+      }
+      if(distance > (disc+1)*255)
+      {
+        disc++;
+      }
+     if(distance>255 && distance<=(disc+1)*255)
+      {
+      er=distance-(disc*255);
+      }
+      SPDR=er;
+      op++;
+      return;
+     }
+     
+     if(c==3 && op==3) //3 for count distance
+     {
+      SPDR=disc;
+      disc=0;
+      op=0;
+      return;
+     }
+     
+  }
+  /*if(c!=-1)
+  {
+    recev=c;
+    process_it=true;
+  }*/
+  
+
+
+void forward(int mos)
+{
+  analogWrite(l1, mos);
+  analogWrite(l2, 0);
+  analogWrite(r1, mos);
+  analogWrite(r2, 0);
+}
+void right()
+{
+  digitalWrite(l1, HIGH);
+  digitalWrite(l2, LOW);
+  digitalWrite(r1, LOW);
+  digitalWrite(r2, HIGH);
+}
+void left()
+{
+  digitalWrite(l1, LOW);
+  digitalWrite(l2, HIGH);
+  digitalWrite(r1, HIGH);
+  digitalWrite(r2, LOW);
+}
+void back()
+{
+  digitalWrite(l1, LOW);
+  digitalWrite(l2, HIGH);
+  digitalWrite(r1, LOW);
+  digitalWrite(r2, HIGH);
+}
+void sto()
+{
+  digitalWrite(l1, LOW);
+  digitalWrite(l2, LOW);
+  digitalWrite(r1, LOW);
+  digitalWrite(r2, LOW);
+}
+
+
+void blutooth()
+{
+  if (BTSerial.available())
+  {
+    ch = BTSerial.read();
+    Serial.write(ch);
+    Serial.println();
+  }
+}
+void loop()
+{ 
+  t=digitalRead(7);
+  if(t==HIGH)
+  {
+    countir++;
+    
+  }
+
+  /*if(recev=='r' && process_it==true)   //r = ruko
+  {
+    sto();
+    process_it=false;
+  }*/
+  while(ch1==ch)
+  {
+  if(BTSerial.available())
+  {
+    ch = BTSerial.read();
+    Serial.write(ch);
+    Serial.println();
+  }
+  delay(2000);
+  if(ch1==ch)
+  {
+    ch='w';
+  }
+  }
+    ch1=ch;
+    if(ch=='w' || ch=='W')
+    { 
+      forward(200);
+      Serial.print("Going Forward"); 
+      rtc(); 
+    }
+   if(ch=='a' || ch =='A')
+    {
+    left();
+    Serial.print("Going Left"); 
+    rtc();
+    }
+    if (ch=='s' || ch=='S')
+    {
+       back();
+       Serial.print("Going Back"); 
+       rtc();
+    }
+    if(ch=='d' || ch=='D')
+    {
+    right();
+    Serial.print("Going Right"); 
+    rtc(); 
+    }
+    if(ch=='x' || ch=='X')
+    {
+      t= digitalRead(7);
+      while(t==LOW)
+       {
+          forward(70);
+          t= digitalRead(7);
+          if(t==HIGH)
+          {
+            break;
+          }
+                 
+       }
+                
+        
+        Serial.print("Stopped");
+        rtc();
+        distance = countir*(2*M_PI*r);
+        countir=0;
+        sto();
+        
+                
+    }
+    }
