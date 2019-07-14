@@ -1,0 +1,238 @@
+#include <ESP8266WiFi.h>
+#include<Wire.h>
+#include <SPI.h>
+#include <WiFiClient.h>
+#include <ESP8266WebServer.h>
+#include <ESP8266WiFiMulti.h>
+#include <RTClib.h>
+
+
+ESP8266WiFiMulti WiFiMulti;
+int irsens;
+int CS=15;
+int sda;
+int scl;
+int pitch1;
+RTC_DS1307 RTC;
+
+int left=0, right=0;
+int mastdist;
+int mastpitch;
+int mastcount;
+int slavecount;
+String line="";
+ void setup() {
+    Serial.begin(115200);
+    delay(10);
+
+    pinMode(irsens, INPUT);
+    
+     // We start by connecting to a WiFi network
+    WiFiMulti.addAP("And", "robo1234");
+     Serial.println();
+    Serial.println();
+    Serial.print("Wait for WiFi... ");
+    while(WiFiMulti.run() != WL_CONNECTED)
+     {
+        Serial.print(".");
+        delay(500);
+    }
+    Serial.println("");
+    Serial.println("WiFi connected");
+    Serial.println("IP address: ");
+    Serial.println(WiFi.localIP());
+    delay(500);
+
+  
+
+  //SPI.begin();
+  //pinMode(CS, OUTPUT);
+  //digitalWrite(CS, HIGH);      
+
+  Wire.begin(sda,scl);
+  RTC.begin();
+  if (!RTC.isrunning())
+  {
+    Serial.println("RTC is NOT running!\n");
+  }
+  RTC.adjust(DateTime(0, 0, 0, 0, 0, 0));
+ 
+  
+}
+
+
+
+int spi_data;
+
+
+void spi_com()
+{
+  SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+  
+  digitalWrite(CS, LOW);
+  SPI.transfer(0);
+  digitalWrite(CS, HIGH);
+
+  digitalWrite(CS, LOW);
+  SPI.transfer(mastdist);    //count val
+  digitalWrite(CS, HIGH);
+
+  while(true)
+  { 
+    digitalWrite(CS, LOW);
+    SPI.transfer(5);
+    digitalWrite(CS, HIGH);
+    
+    digitalWrite(CS, LOW);
+    spi_data=SPI.transfer(5);
+    digitalWrite(CS, HIGH);   // To check if BOT has covered mastdistance
+    if(spi_data ==10)   
+    {
+      break;
+    }
+    if(spi_data==6)
+    {
+      // obstacle encountered. send STOP to mast
+      
+    }
+  }
+  
+  if(right){                    // NEEDS EDITING
+  while(abs(pitch1)<=abs(mastpitch)){
+    digitalWrite(CS, LOW);
+    SPI.transfer(1);  // 1 means left;
+    digitalWrite(CS, HIGH);
+   // mpu();
+    
+    
+  }
+
+   digitalWrite(CS, LOW);
+   SPI.transfer(3);  // 3 means stop;
+   digitalWrite(CS, HIGH);
+  }
+  
+  
+  if(left){                 // NEEDS EDITING
+  while(abs(pitch1)<=abs(mastpitch))
+  {
+    digitalWrite(CS, LOW);
+    SPI.transfer(2);//2 means right
+    digitalWrite(CS, HIGH);
+    //mpu();
+    
+  }
+  digitalWrite(CS, LOW);
+  SPI.transfer(3);              // 3 means stop;
+  digitalWrite(CS, HIGH);
+  }
+
+  digitalWrite(CS, LOW);
+  SPI.transfer(4);
+  digitalWrite(CS, HIGH);
+  
+  SPI.endTransaction();
+}
+
+int left1, right1;
+int m,s;
+void rtc()
+{
+  DateTime now = RTC.now();
+  m = now.minute();
+  s = now.second();
+  if (m > 0)
+  {
+    s = s + (m * 60);
+  }
+  Serial.print(" Sec: ");
+ // Serial.print(s, DEC);
+  Serial.println();
+  //delay(1000);
+}
+
+ 
+void loop() {
+    const uint16_t port = 80;
+    const char * host = "192.168.43.122";  // works with api.thingspeak.com
+     
+    
+    Serial.print("connecting tlko ");
+    Serial.println(host);
+     // Use WiFiClient class to create TCP connections
+    WiFiClient client;
+     if (!client.connect(host, port)) {
+        Serial.println("connection failed");
+        Serial.println("wait 5 sec...");
+        delay(1000);
+        return;
+    }
+     // This will send the request to the server
+    Serial.println("Connected!!!!!");
+    //Serial.print("Send this data to server");
+  String url = "192.168.43.122";      // put the complete url
+  Serial.print("requesting URL: ");
+  Serial.println(url);
+  client.print(String("GET ") + url + " HTTP/1.1\r\n" +
+               "Host: " + host + "\r\n" +
+               "Cache-Control: no-cache\r\n\r\n");
+                Serial.print(String("GET ") + url + " HTTP/1.1\r\n" +
+               "Host: " + host + "\r\n" +
+               "Connection: close\r\n\r\n");
+                /* 
+                *  GET /apps/thinghttp/send_request?api_key=QOSIIMQ9NBH5YQQN HTTP/1.1 
+                *  Host: api.thingspeak.com
+                *  Connection; close
+                */
+delay(1000);
+    while(client.available()){
+    String line = client.readStringUntil('\r');
+    Serial.print(line);
+    String mastpitch = line.substring('P','p');
+    mastpitch.toFloat();
+    String mastroll = line.substring('R','r');
+    mastroll.toFloat();
+  }
+    Serial.println(line);
+    
+    
+    mastpitch;
+    mastdist;
+    mastcount;
+    slavecount;
+    
+    if(mastcount-1==slavecount)
+    {  
+      slavecount=mastcount;
+      if(mastpitch<0)
+      {  
+        left1= 1;
+        right1=0;
+       
+       }
+       else if (mastpitch>0)
+       {
+          left1=0;
+          right1=1;
+       }
+       else 
+       { 
+        left1=0; 
+        right1=0;
+       }
+       
+      
+
+       
+     //spi_com();
+    }
+    
+    
+    
+    Serial.println("closing connection");
+    client.stop();
+    
+    Serial.println("wait 5 sec...");
+    delay(5000);
+}
+  
